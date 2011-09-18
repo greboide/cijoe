@@ -27,6 +27,11 @@ class CIJoe
       erb(:template, {}, :joe => joe)
     end
 
+    post '/deploy' do
+      joe.deploy
+      redirect '/'
+    end
+
     post '/?' do
       unless params[:rebuild]
         payload = JSON.parse(params[:payload])

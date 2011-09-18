@@ -4,6 +4,9 @@
     <link href="<%= cijoe_root %>/screen.css" media="screen" rel="stylesheet" type="text/css" />
     <link rel="shortcut icon" href="<%= cijoe_root %>/favicon.ico" type="image/x-icon" />
     <title><%= h(joe.project) %>: CI Joe</title>
+    <script>
+      window.setTimeout( function(){ if ( ! window.keep ) window.location.reload(); }, 5000 );
+    </script>
   </head>
   <body>
     <div class="site">
@@ -26,6 +29,13 @@
             </li>
           <% else %>
             <li><form method="POST"><input type="hidden", name="rebuild" value="true"><input type="submit" value="Build"/></form></li>
+            <% unless joe.last_build.failed? %>
+            <% if joe.current_deploy %>
+            <li>Deploying ...</li>
+            <% else %>
+            <li><form method="POST" action="/deploy"><input type="submit" value="Deploy"/></form></li>
+            <% end %>
+            <% end %>
           <% end %>
           
           <% if joe.last_build %>

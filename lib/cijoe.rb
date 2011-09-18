@@ -17,12 +17,13 @@ require 'cijoe/version'
 require 'cijoe/config'
 require 'cijoe/commit'
 require 'cijoe/build'
+require 'cijoe/deploy'
 require 'cijoe/campfire'
 require 'cijoe/server'
 require 'cijoe/queue'
 
 class CIJoe
-  attr_reader :user, :project, :url, :current_build, :last_build, :campfire
+  attr_reader :user, :project, :url, :current_build, :last_build, :current_deploy, :campfire
 
   def initialize(project_path)
     @project_path = File.expand_path(project_path)
@@ -44,9 +45,17 @@ class CIJoe
     !!@current_build
   end
 
+  def deploying?
+    !!@current_deploy
+  end
+
   # the pid of the running child process
   def pid
     building? and current_build.pid
+  end
+
+  def deploy_pid
+    deploying? and current_deploy.pid
   end
 
   # kill the child and exit
@@ -78,6 +87,28 @@ class CIJoe
     @campfire.notify(@last_build) if @campfire.valid?
 
     build(@queue.next_branch_to_build) if @queue.waiting?
+  end
+
+  # deploy callbacks
+  def deploy_failed(output, error)
+    finish_deploy :failed, "#{error}\n\n#{output}"
+    run_hook "deploy-failed"
+  end
+
+  def deploy_worked(output)
+    finish_deploy :worked, output
+    run_hook "deploy-worked"
+  end
+
+  def finish_deploy(status, output)
+    @current_deploy.finished_at = Time.now
+    @current_deploy.status = status
+    @current_deploy.output = output
+    @last_deploy = @current_deploy
+
+    @current_deploy = nil
+    write_deploy 'current', @current_deploy
+    write_deploy 'last', @last_deploy
   end
 
   # run the build but make sure only one is running
@@ -136,10 +167,52 @@ class CIJoe
     build_failed('', e.to_s)
   end
 
+  def deploy(branch=nil)
+    return if building? || deploying?
+    @current_deploy = Deploy.new(@project_path, @user, @project)
+    write_deploy 'current', @current_deploy
+    Thread.new { deploy!(branch) }
+  end
+
+
+  # run the deploy
+  def deploy!(branch=nil)
+    @git_branch = branch
+    deploy = @current_deploy
+    output = ''
+    #git_update
+    deploy.sha = git_sha
+    deploy.branch = git_branch
+    write_deploy 'current', deploy
+
+    open_pipe("cd #{@project_path} && #{deploy_command} 2>&1") do |pipe, pid|
+      puts "#{Time.now.to_i}: Deploying #{deploy.branch} at #{deploy.short_sha}: pid=#{deploy_pid}"
+
+      deploy.pid = pid
+      write_deploy 'current', deploy
+      output = pipe.read
+    end
+
+    Process.waitpid(deploy.pid, 1)
+    status = $?.exitstatus.to_i
+    @current_deploy = deploy
+    puts "#{Time.now.to_i}: Deployed #{deploy.short_sha}: status=#{status}"
+
+    status == 0 ? deploy_worked(output) : deploy_failed('', output)
+  rescue Object => e
+    puts "Exception deploying: #{e.message} (#{e.class})"
+    puts e.backtrace.join( "\n" )
+    deploy_failed('', e.to_s)
+  end
+
   # shellin' out
   def runner_command
     runner = repo_config.runner.to_s
     runner == '' ? "rake -s test:units" : runner
+  end
+
+  def deploy_command
+    'cap production deploy'
   end
 
   def git_sha
@@ -209,6 +282,17 @@ class CIJoe
     Dir.mkdir path_in_project('.git/builds') unless File.directory?(path_in_project('.git/builds'))
     if build
       build.dump filename
+    elsif File.exist?(filename)
+      File.unlink filename
+    end
+  end
+
+  # write deploy info for deploy to file.
+  def write_deploy(name, deploy)
+    filename = path_in_project(".git/deploys/#{name}")
+    Dir.mkdir path_in_project('.git/deploys') unless File.directory?(path_in_project('.git/deploys'))
+    if deploy
+      deploy.dump filename
     elsif File.exist?(filename)
       File.unlink filename
     end
