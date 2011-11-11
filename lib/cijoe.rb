@@ -176,7 +176,7 @@ class CIJoe
 
 
   # run the deploy
-  def deploy!(branch=nil)
+  def deploy!(branch=nil,stage='staging')
     @git_branch = branch
     deploy = @current_deploy
     output = ''
@@ -185,7 +185,7 @@ class CIJoe
     deploy.branch = git_branch
     write_deploy 'current', deploy
 
-    open_pipe("cd #{@project_path} && #{deploy_command} 2>&1") do |pipe, pid|
+    open_pipe("cd #{@project_path} && #{deploy_command(stage)} 2>&1") do |pipe, pid|
       puts "#{Time.now.to_i}: Deploying #{deploy.branch} at #{deploy.short_sha}: pid=#{deploy_pid}"
 
       deploy.pid = pid
@@ -211,8 +211,8 @@ class CIJoe
     runner == '' ? "rake -s test:units" : runner
   end
 
-  def deploy_command
-    'cap production deploy'
+  def deploy_command(stage)
+    'cap #{stage} deploy'
   end
 
   def git_sha
@@ -253,7 +253,7 @@ class CIJoe
       ENV.clear
       data.each{ |k, v| ENV[k] = v }
       output = `cd #{@project_path} && sh #{file}`
-      
+
       ENV.clear
       orig_ENV.to_hash.each{ |k, v| ENV[k] = v}
       output
