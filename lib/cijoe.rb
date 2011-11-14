@@ -212,7 +212,7 @@ class CIJoe
   end
 
   def deploy_command(stage)
-    'cap #{stage} deploy'
+    "cap #{stage} deploy"
   end
 
   def git_sha
